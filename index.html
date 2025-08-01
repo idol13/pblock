@@ -1,0 +1,264 @@
+import { useState } from 'react';
+
+// Password fissa per l'accesso e la crittografia.
+const FIXED_PASSWORD = 'company13';
+
+// Funzione di utilità per criptare e decriptare i messaggi
+// Aggiungo anche una funzione per creare una chiave robusta dalla password
+async function deriveKeyFromPassword(password, salt) {
+  const enc = new TextEncoder();
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveKey"]
+  );
+  return await crypto.subtle.deriveKey(
+    {
+      name: "PBKDF2",
+      salt: enc.encode(salt),
+      iterations: 100000,
+      hash: "SHA-256",
+    },
+    keyMaterial,
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+}
+
+// Cripta un messaggio con una chiave derivata dalla password
+async function encryptMessage(message, password) {
+  const enc = new TextEncoder();
+  const salt = 'chat-salt';
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await deriveKeyFromPassword(password, salt);
+  const encryptedContent = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv: iv },
+    key,
+    enc.encode(message)
+  );
+  const encryptedArray = new Uint8Array(encryptedContent);
+  const ivBase64 = btoa(String.fromCharCode.apply(null, iv));
+  const encryptedBase64 = btoa(String.fromCharCode.apply(null, encryptedArray));
+  return `${ivBase64}:${encryptedBase64}`;
+}
+
+// Decifra un messaggio con una chiave derivata dalla password
+async function decryptMessage(encryptedMessage, password) {
+  try {
+    const [ivBase64, encryptedBase64] = encryptedMessage.split(':');
+    const dec = new TextDecoder();
+    const salt = 'chat-salt';
+    const iv = Uint8Array.from(atob(ivBase64), c => c.charCodeAt(0));
+    const encryptedArray = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+    const key = await deriveKeyFromPassword(password, salt);
+    const decryptedContent = await crypto.subtle.decrypt(
+      { name: "AES-GCM", iv: iv },
+      key,
+      encryptedArray
+    );
+    return dec.decode(decryptedContent);
+  } catch (error) {
+    console.error("Decrittazione fallita: ", error);
+    return "Impossibile decrittare il messaggio. Controlla la password.";
+  }
+}
+
+// Componente principale dell'app
+export default function App() {
+  const [username, setUsername] = useState(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [messages, setMessages] = useState([]);
+  
+  const handleLogin = (name) => {
+    setUsername(name);
+    setIsAuthenticated(true);
+  };
+
+  const handleLogout = () => {
+    setUsername(null);
+    setIsAuthenticated(false);
+  };
+  
+  const handleNewMessage = (newMessage) => {
+    setMessages(prevMessages => [...prevMessages, newMessage]);
+  };
+
+  return (
+    <div className="flex flex-col min-h-screen bg-gray-900 text-gray-200 font-sans antialiased">
+      {!isAuthenticated ? (
+        <LoginScreen onLogin={handleLogin} />
+      ) : (
+        <Chat username={username} messages={messages} onNewMessage={handleNewMessage} onLogout={handleLogout} />
+      )}
+    </div>
+  );
+}
+
+// Componente della schermata di accesso
+function LoginScreen({ onLogin }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    setError('');
+    setIsLoading(true);
+
+    if (password === FIXED_PASSWORD) {
+      onLogin(username);
+    } else {
+      setError('Password errata!');
+    }
+    setIsLoading(false);
+  };
+
+  return (
+    <div className="flex items-center justify-center min-h-screen p-4">
+      <div className="bg-gray-800 p-8 rounded-2xl shadow-xl w-full max-w-sm">
+        <h1 className="text-3xl font-bold text-center mb-6 text-indigo-400">
+          Accedi alla Chat Segreta
+        </h1>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-1">Username</label>
+            <input
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              className="w-full p-3 bg-gray-700 rounded-lg text-white border border-gray-600 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Password</label>
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full p-3 bg-gray-700 rounded-lg text-white border border-gray-600 focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+              required
+            />
+          </div>
+          {error && <div className="text-red-400 text-center text-sm">{error}</div>}
+          <button
+            type="submit"
+            className="w-full py-3 px-4 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 transition duration-300 shadow-md flex items-center justify-center disabled:opacity-50"
+            disabled={isLoading || !username || !password}
+          >
+            {isLoading ? (
+              <svg className="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            ) : (
+              'Accedi'
+            )}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Componente della chat
+function Chat({ username, messages, onNewMessage, onLogout }) {
+  const [newMessage, setNewMessage] = useState('');
+  const [decryptionError, setDecryptionError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+
+  const handleSendMessage = async (e) => {
+    e.preventDefault();
+    if (newMessage.trim() === '') return;
+    setIsLoading(true);
+    
+    // Simula l'invio e la ricezione di un messaggio
+    const encryptedMessage = await encryptMessage(newMessage, FIXED_PASSWORD);
+    const decryptedMessage = await decryptMessage(encryptedMessage, FIXED_PASSWORD);
+    
+    onNewMessage({
+      displayName: username,
+      text: decryptedMessage,
+      localId: Math.random(), // ID locale per differenziare i messaggi
+      createdAt: new Date(),
+    });
+    
+    setNewMessage('');
+    setIsLoading(false);
+  };
+  
+
+  return (
+    <div className="flex flex-col flex-grow w-full max-w-2xl mx-auto h-full p-4">
+      <div className="flex justify-between items-center bg-gray-800 p-4 rounded-t-2xl shadow-lg">
+        <div className="flex items-center">
+          <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold">
+            {username.charAt(0).toUpperCase()}
+          </div>
+          <span className="ml-3 text-lg font-semibold text-white">
+            Bentornato, {username}!
+          </span>
+        </div>
+        <button
+          onClick={onLogout}
+          className="py-2 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-300 shadow-md text-sm"
+        >
+          Esci
+        </button>
+      </div>
+
+      <div className="flex-grow overflow-y-auto p-4 space-y-4 bg-gray-800 rounded-b-2xl shadow-lg mb-4">
+        {decryptionError && (
+          <div className="text-center text-red-400 p-2 rounded-lg bg-gray-700">
+            {decryptionError}
+          </div>
+        )}
+        <div className="text-center text-xs text-gray-500">
+          La password per questa chat è: <code className="bg-gray-700 p-1 rounded text-white">{FIXED_PASSWORD}</code>
+        </div>
+        {messages.map((msg, index) => (
+          <div
+            key={index}
+            className={`flex ${msg.displayName === username ? 'justify-end' : 'justify-start'}`}
+          >
+            <div className={`flex flex-col max-w-xs sm:max-w-md p-3 rounded-xl shadow-lg ${msg.displayName === username ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-200'}`}>
+              <div className="flex items-center">
+                <span className={`font-semibold text-sm ${msg.displayName === username ? 'text-white' : 'text-indigo-400'}`}>
+                  {msg.displayName}
+                </span>
+                {msg.createdAt && (
+                  <span className="text-xs text-gray-400 ml-2">
+                    {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+              </div>
+              <p className="mt-1 text-sm">{msg.text}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <form onSubmit={handleSendMessage} className="flex space-x-2">
+        <input
+          type="text"
+          value={newMessage}
+          onChange={(e) => setNewMessage(e.target.value)}
+          className="flex-grow p-3 bg-gray-800 rounded-xl text-white border border-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 transition duration-300"
+          placeholder="Scrivi un messaggio..."
+          disabled={isLoading}
+        />
+        <button
+          type="submit"
+          className="px-6 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 transition duration-300 shadow-md disabled:opacity-50"
+          disabled={isLoading || newMessage.trim() === ''}
+        >
+          Invia
+        </button>
+      </form>
+    </div>
+  );
+}        
