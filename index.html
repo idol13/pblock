@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Segreta</title>
+    <title>Chat di Gruppo</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         body {
@@ -37,15 +37,31 @@
     <div id="app" class="flex flex-col w-full max-w-2xl mx-auto h-full p-4">
         <!-- Contenuto dell'app sarà iniettato qui -->
     </div>
+    
+    <script type="module">
+        // Importa le librerie Firebase
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-    <script>
+        // Variabili globali per l'ambiente Canvas, fornite automaticamente.
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Password fissa per l'accesso e la crittografia.
         const FIXED_PASSWORD = 'company13';
+        
+        // Stato dell'applicazione
         let isAuthenticated = false;
         let username = '';
-        let messages = [];
-
+        let localId = '';
+        let db = null;
+        let auth = null;
+        
         const appContainer = document.getElementById('app');
 
+        // Funzione per derivare una chiave dalla password
         async function deriveKeyFromPassword(password, salt) {
             const enc = new TextEncoder();
             const keyMaterial = await crypto.subtle.importKey(
@@ -69,6 +85,7 @@
             );
         }
 
+        // Funzione per criptare un messaggio
         async function encryptMessage(message, password) {
             const enc = new TextEncoder();
             const salt = 'chat-salt';
@@ -85,6 +102,7 @@
             return `${ivBase64}:${encryptedBase64}`;
         }
 
+        // Funzione per decifrare un messaggio
         async function decryptMessage(encryptedMessage, password) {
             try {
                 const [ivBase64, encryptedBase64] = encryptedMessage.split(':');
@@ -101,10 +119,33 @@
                 return dec.decode(decryptedContent);
             } catch (error) {
                 console.error("Decrittazione fallita: ", error);
+                // Se la decifratura fallisce, restituisci un messaggio di errore chiaro
                 return "Impossibile decrittare il messaggio. Controlla la password.";
             }
         }
 
+        // Funzione per inizializzare Firebase e l'autenticazione
+        async function initializeFirebase() {
+            try {
+                const firebaseApp = initializeApp(firebaseConfig);
+                db = getFirestore(firebaseApp);
+                auth = getAuth(firebaseApp);
+                
+                // Effettua l'accesso anonimo per avere permessi di lettura/scrittura
+                await signInAnonymously(auth);
+                
+                // Imposta l'ID utente dopo l'autenticazione
+                localId = auth.currentUser.uid;
+                
+                // Dopo l'inizializzazione, rendiamo la schermata di login
+                renderLoginScreen();
+            } catch (error) {
+                console.error("Errore nell'inizializzazione di Firebase:", error);
+                appContainer.innerHTML = `<div class="text-red-500 text-center p-4">Errore nell'inizializzazione dell'app. Controlla la console.</div>`;
+            }
+        }
+
+        // Funzione per rendere la schermata di login
         function renderLoginScreen() {
             appContainer.innerHTML = `
                 <div class="flex items-center justify-center min-h-screen p-4">
@@ -147,7 +188,13 @@
             });
         }
 
-        function renderChatApp() {
+        // Funzione per rendere la schermata della chat
+        async function renderChatApp() {
+            if (!db) {
+                console.error("Firestore non è inizializzato.");
+                return;
+            }
+
             appContainer.innerHTML = `
                 <div class="flex flex-col flex-grow w-full max-w-2xl mx-auto h-full p-4">
                     <div class="flex justify-between items-center bg-gray-800 p-4 rounded-t-2xl shadow-lg">
@@ -179,13 +226,15 @@
                 </div>
             `;
             
+            // Gestore per il pulsante di logout
             document.getElementById('logoutBtn').addEventListener('click', () => {
                 isAuthenticated = false;
                 username = '';
-                messages = [];
+                // Non cancellare i messaggi dal database, ma dalla vista locale
                 renderLoginScreen();
             });
 
+            // Gestore per il form di invio messaggi
             document.getElementById('chatForm').addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const messageInput = document.getElementById('messageInput');
@@ -193,49 +242,80 @@
                 
                 if (newMessage === '') return;
                 
-                // Cripta e decifra il messaggio per dimostrare la funzionalità
-                const encryptedMessage = await encryptMessage(newMessage, FIXED_PASSWORD);
-                const decryptedMessage = await decryptMessage(encryptedMessage, FIXED_PASSWORD);
-                
-                messages.push({
-                    displayName: username,
-                    text: decryptedMessage,
-                    createdAt: new Date(),
-                });
-                
-                messageInput.value = '';
-                updateChatDisplay();
+                try {
+                    const encryptedMessage = await encryptMessage(newMessage, FIXED_PASSWORD);
+                    const chatCollectionRef = collection(db, `/artifacts/${appId}/public/data/messages`);
+                    await addDoc(chatCollectionRef, {
+                        text: encryptedMessage,
+                        createdAt: serverTimestamp(),
+                        localId: localId, // Usa l'ID utente Firebase per identificare chi ha scritto il messaggio
+                        displayName: username,
+                    });
+                    messageInput.value = '';
+                } catch (error) {
+                    console.error("Errore nell'invio del messaggio:", error);
+                }
             });
-            
-            updateChatDisplay();
+
+            // Ascolta i messaggi in tempo reale da Firestore
+            const chatCollectionRef = collection(db, `/artifacts/${appId}/public/data/messages`);
+            const q = query(chatCollectionRef, orderBy('createdAt'));
+
+            onSnapshot(q, async (snapshot) => {
+                let messages = [];
+                for (const doc of snapshot.docs) {
+                    const data = doc.data();
+                    const encryptedText = data.text;
+                    const decryptedText = await decryptMessage(encryptedText, FIXED_PASSWORD);
+                    messages.push({
+                        id: doc.id,
+                        ...data,
+                        text: decryptedText
+                    });
+                }
+                updateChatDisplay(messages);
+            }, (error) => {
+                console.error("Errore nel recupero dei messaggi: ", error);
+            });
         }
         
-        function updateChatDisplay() {
+        // Funzione per aggiornare la visualizzazione dei messaggi
+        function updateChatDisplay(messages) {
             const messagesContainer = document.getElementById('messagesContainer');
-            messagesContainer.innerHTML = `
+            let messagesHtml = `
                 <div class="text-center text-xs text-gray-500">
                     La password per questa chat è: <code class="bg-gray-700 p-1 rounded text-white">${FIXED_PASSWORD}</code>
                 </div>
-                ${messages.map(msg => `
-                    <div class="flex ${msg.displayName === username ? 'justify-end' : 'justify-start'}">
-                        <div class="flex flex-col max-w-xs sm:max-w-md p-3 rounded-xl shadow-lg ${msg.displayName === username ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-200'}">
+            `;
+            messages.forEach(msg => {
+                messagesHtml += `
+                    <div class="flex ${msg.localId === localId ? 'justify-end' : 'justify-start'}">
+                        <div class="flex flex-col max-w-xs sm:max-w-md p-3 rounded-xl shadow-lg ${msg.localId === localId ? 'bg-indigo-600 text-white' : 'bg-gray-700 text-gray-200'}">
                             <div class="flex items-center">
-                                <span class="font-semibold text-sm ${msg.displayName === username ? 'text-white' : 'text-indigo-400'}">
+                                <span class="font-semibold text-sm ${msg.localId === localId ? 'text-white' : 'text-indigo-400'}">
                                     ${msg.displayName}
                                 </span>
                                 <span class="text-xs text-gray-400 ml-2">
-                                    ${new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    ${msg.createdAt ? new Date(msg.createdAt.toDate()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}
                                 </span>
                             </div>
                             <p class="mt-1 text-sm">${msg.text}</p>
                         </div>
                     </div>
-                `).join('')}
-            `;
+                `;
+            });
+            messagesContainer.innerHTML = messagesHtml;
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        renderLoginScreen();
+        // Inizializza l'app quando la pagina è caricata
+        if (Object.keys(firebaseConfig).length > 0) {
+            initializeFirebase();
+        } else {
+            // Se firebaseConfig non è disponibile, mostra un messaggio di errore
+            appContainer.innerHTML = `<div class="text-red-500 text-center p-4">Errore: Configurazione Firebase non trovata.</div>`;
+        }
+
     </script>
 </body>
 </html>
