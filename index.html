@@ -30,6 +30,14 @@
             text-align: left;
             border-bottom-left-radius: 0;
         }
+        .container {
+            display: flex;
+            flex-direction: column;
+            width: 100%;
+            max-width: 2xl;
+            margin: auto;
+            height: 100vh;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-gray-200 antialiased flex items-center justify-center min-h-screen p-4">
@@ -44,11 +52,10 @@
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Variabili globali per l'ambiente Canvas, fornite automaticamente.
+        // Variabili globali fornite dall'ambiente Canvas.
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
+        
         // Password fissa per l'accesso e la crittografia.
         const FIXED_PASSWORD = 'company13';
         
@@ -119,25 +126,20 @@
                 return dec.decode(decryptedContent);
             } catch (error) {
                 console.error("Decrittazione fallita: ", error);
-                // Se la decifratura fallisce, restituisci un messaggio di errore chiaro
                 return "Impossibile decrittare il messaggio. Controlla la password.";
             }
         }
 
-        // Funzione per inizializzare Firebase e l'autenticazione
+        // Funzione per inizializzare Firebase
         async function initializeFirebase() {
             try {
                 const firebaseApp = initializeApp(firebaseConfig);
                 db = getFirestore(firebaseApp);
                 auth = getAuth(firebaseApp);
                 
-                // Effettua l'accesso anonimo per avere permessi di lettura/scrittura
                 await signInAnonymously(auth);
-                
-                // Imposta l'ID utente dopo l'autenticazione
                 localId = auth.currentUser.uid;
                 
-                // Dopo l'inizializzazione, rendiamo la schermata di login
                 renderLoginScreen();
             } catch (error) {
                 console.error("Errore nell'inizializzazione di Firebase:", error);
@@ -151,7 +153,7 @@
                 <div class="flex items-center justify-center min-h-screen p-4">
                     <div class="bg-gray-800 p-8 rounded-2xl shadow-xl w-full max-w-sm">
                         <h1 class="text-3xl font-bold text-center mb-6 text-indigo-400">
-                            Accedi alla Chat Segreta
+                            Accedi alla Chat di Gruppo
                         </h1>
                         <form id="loginForm" class="space-y-4">
                             <div>
@@ -188,13 +190,8 @@
             });
         }
 
-        // Funzione per rendere la schermata della chat
-        async function renderChatApp() {
-            if (!db) {
-                console.error("Firestore non è inizializzato.");
-                return;
-            }
-
+        // Funzione per rendere la schermata della chat e gestire la logica
+        function renderChatApp() {
             appContainer.innerHTML = `
                 <div class="flex flex-col flex-grow w-full max-w-2xl mx-auto h-full p-4">
                     <div class="flex justify-between items-center bg-gray-800 p-4 rounded-t-2xl shadow-lg">
@@ -215,6 +212,7 @@
                         <div class="text-center text-xs text-gray-500">
                             La password per questa chat è: <code class="bg-gray-700 p-1 rounded text-white">${FIXED_PASSWORD}</code>
                         </div>
+                        <!-- I messaggi saranno inseriti qui -->
                     </div>
 
                     <form id="chatForm" class="flex space-x-2">
@@ -230,7 +228,6 @@
             document.getElementById('logoutBtn').addEventListener('click', () => {
                 isAuthenticated = false;
                 username = '';
-                // Non cancellare i messaggi dal database, ma dalla vista locale
                 renderLoginScreen();
             });
 
@@ -248,7 +245,7 @@
                     await addDoc(chatCollectionRef, {
                         text: encryptedMessage,
                         createdAt: serverTimestamp(),
-                        localId: localId, // Usa l'ID utente Firebase per identificare chi ha scritto il messaggio
+                        localId: localId,
                         displayName: username,
                     });
                     messageInput.value = '';
@@ -308,13 +305,14 @@
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
-        // Inizializza l'app quando la pagina è caricata
-        if (Object.keys(firebaseConfig).length > 0) {
-            initializeFirebase();
-        } else {
-            // Se firebaseConfig non è disponibile, mostra un messaggio di errore
-            appContainer.innerHTML = `<div class="text-red-500 text-center p-4">Errore: Configurazione Firebase non trovata.</div>`;
-        }
+        // Avvia l'app quando la finestra è completamente caricata
+        window.onload = function() {
+            if (Object.keys(firebaseConfig).length > 0) {
+                initializeFirebase();
+            } else {
+                appContainer.innerHTML = `<div class="text-red-500 text-center p-4">Errore: Configurazione Firebase non trovata.</div>`;
+            }
+        };
 
     </script>
 </body>
