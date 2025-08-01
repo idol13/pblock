@@ -49,25 +49,28 @@
     <script type="module">
         // Importa le librerie Firebase
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, query, orderBy, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Variabili globali fornite dall'ambiente Canvas.
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        
-        // Se non viene trovata alcuna configurazione da Canvas, usa questa.
-        // SOSTITUISCI I SEGUENTI VALORI CON LA TUA CONFIGURAZIONE DI PROGETTO FIRESTORE.
+        // ==========================================================
+        // === PASSO IMPORTANTE: SOSTITUISCI CON I TUOI DATI FIRESTORE ===
+        // ==========================================================
+        // Se usi questa app in Canvas, la configurazione verrà fornita automaticamente.
+        // Se pubblichi l'app, DEVI SOSTITUIRE questi segnaposto con le tue credenziali.
+        // Puoi trovare queste informazioni nella tua Console Firebase, in "Impostazioni progetto".
         const manualFirebaseConfig = {
-            apiKey: "AIzaSyC-...",
-            authDomain: "projectId.firebaseapp.com",
-            projectId: "projectId",
-            storageBucket: "projectId.appspot.com",
-            messagingSenderId: "...",
-            appId: "1:...",
+            apiKey: "INSERISCI_LA_TUA_CHIAVE_API_QUI",
+            authDomain: "INSERISCI_IL_TUO_DOMINIO_QUI",
+            projectId: "INSERISCI_IL_TUO_ID_PROGETTO_QUI",
+            storageBucket: "INSERISCI_IL_TUO_STORAGE_BUCKET_QUI",
+            messagingSenderId: "INSERISCI_IL_TUO_MESSAGING_SENDER_ID_QUI",
+            appId: "INSERISCI_IL_TUO_APP_ID_QUI",
         };
         
-        const activeFirebaseConfig = firebaseConfig || manualFirebaseConfig;
+        // Carica la configurazione fornita dall'ambiente Canvas, altrimenti usa quella manuale.
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualFirebaseConfig;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
         
         // Password fissa per l'accesso e la crittografia.
         const FIXED_PASSWORD = 'company13';
@@ -146,15 +149,31 @@
         // Funzione per inizializzare Firebase
         async function initializeFirebase() {
             try {
-                // Usa la configurazione trovata o quella manuale
-                const firebaseApp = initializeApp(activeFirebaseConfig);
+                // Aggiunto un controllo per evitare errori se la configurazione è mancante
+                if (!firebaseConfig.projectId || firebaseConfig.projectId.includes("INSERISCI_LA_TUA_")) {
+                    appContainer.innerHTML = `
+                        <div class="text-red-500 text-center p-4">
+                            <p class="font-bold text-xl mb-2">Errore: Dati Firebase non inseriti.</p>
+                            <p>Vai nelle impostazioni del tuo progetto Firebase e copia i tuoi dati di configurazione per sostituire i segnaposto nel codice.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const firebaseApp = initializeApp(firebaseConfig);
                 db = getFirestore(firebaseApp);
                 auth = getAuth(firebaseApp);
-                
-                await signInAnonymously(auth);
+
+                // Autenticazione con token personalizzato o anonima
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
                 localId = auth.currentUser.uid;
-                
                 renderLoginScreen();
+
             } catch (error) {
                 console.error("Errore nell'inizializzazione di Firebase:", error);
                 appContainer.innerHTML = `<div class="text-red-500 text-center p-4">Errore nell'inizializzazione dell'app. Controlla la console.</div>`;
@@ -254,10 +273,10 @@
                 if (newMessage === '') return;
                 
                 try {
-                    const encryptedMessage = await encryptMessage(newMessage, FIXED_PASSWORD);
+                    // Percorso della collezione ora condiviso per tutti gli utenti
                     const chatCollectionRef = collection(db, `/artifacts/${appId}/public/data/messages`);
                     await addDoc(chatCollectionRef, {
-                        text: encryptedMessage,
+                        text: await encryptMessage(newMessage, FIXED_PASSWORD),
                         createdAt: serverTimestamp(),
                         localId: localId,
                         displayName: username,
@@ -270,7 +289,7 @@
 
             // Ascolta i messaggi in tempo reale da Firestore
             const chatCollectionRef = collection(db, `/artifacts/${appId}/public/data/messages`);
-            const q = query(chatCollectionRef, orderBy('createdAt'));
+            const q = query(chatCollectionRef);
 
             onSnapshot(q, async (snapshot) => {
                 let messages = [];
@@ -298,6 +317,10 @@
                     La password per questa chat è: <code class="bg-gray-700 p-1 rounded text-white">${FIXED_PASSWORD}</code>
                 </div>
             `;
+            
+            // Ordina i messaggi per data di creazione, in modo che l'ultimo sia in fondo
+            messages.sort((a, b) => a.createdAt && b.createdAt ? a.createdAt.toMillis() - b.createdAt.toMillis() : 0);
+            
             messages.forEach(msg => {
                 messagesHtml += `
                     <div class="flex ${msg.localId === localId ? 'justify-end' : 'justify-start'}">
