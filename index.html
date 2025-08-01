@@ -54,7 +54,20 @@
 
         // Variabili globali fornite dall'ambiente Canvas.
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        
+        // Se non viene trovata alcuna configurazione da Canvas, usa questa.
+        // SOSTITUISCI I SEGUENTI VALORI CON LA TUA CONFIGURAZIONE DI PROGETTO FIRESTORE.
+        const manualFirebaseConfig = {
+            apiKey: "AIzaSyC-...",
+            authDomain: "projectId.firebaseapp.com",
+            projectId: "projectId",
+            storageBucket: "projectId.appspot.com",
+            messagingSenderId: "...",
+            appId: "1:...",
+        };
+        
+        const activeFirebaseConfig = firebaseConfig || manualFirebaseConfig;
         
         // Password fissa per l'accesso e la crittografia.
         const FIXED_PASSWORD = 'company13';
@@ -133,7 +146,8 @@
         // Funzione per inizializzare Firebase
         async function initializeFirebase() {
             try {
-                const firebaseApp = initializeApp(firebaseConfig);
+                // Usa la configurazione trovata o quella manuale
+                const firebaseApp = initializeApp(activeFirebaseConfig);
                 db = getFirestore(firebaseApp);
                 auth = getAuth(firebaseApp);
                 
@@ -307,11 +321,7 @@
 
         // Avvia l'app quando la finestra è completamente caricata
         window.onload = function() {
-            if (Object.keys(firebaseConfig).length > 0) {
-                initializeFirebase();
-            } else {
-                appContainer.innerHTML = `<div class="text-red-500 text-center p-4">Errore: Configurazione Firebase non trovata.</div>`;
-            }
+            initializeFirebase();
         };
 
     </script>
