@@ -50,7 +50,7 @@
         // Importa le librerie Firebase
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, query, onSnapshot, addDoc, serverTimestamp, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ==========================================================
         // === PASSO IMPORTANTE: SOSTITUISCI CON I TUOI DATI FIRESTORE ===
@@ -67,7 +67,7 @@
             appId: "INSERISCI_IL_TUO_APP_ID_QUI",
         };
         
-        // Carica la configurazione fornita dall'ambiente Canvas, altrimenti usa quella manuale.
+        // Determina la configurazione Firebase da utilizzare
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : manualFirebaseConfig;
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
@@ -149,12 +149,12 @@
         // Funzione per inizializzare Firebase
         async function initializeFirebase() {
             try {
-                // Aggiunto un controllo per evitare errori se la configurazione è mancante
-                if (!firebaseConfig.projectId || firebaseConfig.projectId.includes("INSERISCI_LA_TUA_")) {
+                // Controllo se stiamo utilizzando i segnaposto, che causano l'errore mostrato nello screenshot
+                if (firebaseConfig.projectId.includes("INSERISCI_LA_TUA_")) {
                     appContainer.innerHTML = `
                         <div class="text-red-500 text-center p-4">
                             <p class="font-bold text-xl mb-2">Errore: Dati Firebase non inseriti.</p>
-                            <p>Vai nelle impostazioni del tuo progetto Firebase e copia i tuoi dati di configurazione per sostituire i segnaposto nel codice.</p>
+                            <p>Stai eseguendo l'app al di fuori dell'ambiente che fornisce le credenziali. Per farla funzionare, devi sostituire i segnaposto con i dati del tuo progetto Firebase.</p>
                         </div>
                     `;
                     return;
@@ -289,7 +289,7 @@
 
             // Ascolta i messaggi in tempo reale da Firestore
             const chatCollectionRef = collection(db, `/artifacts/${appId}/public/data/messages`);
-            const q = query(chatCollectionRef);
+            const q = query(chatCollectionRef, orderBy('createdAt'));
 
             onSnapshot(q, async (snapshot) => {
                 let messages = [];
@@ -317,9 +317,6 @@
                     La password per questa chat è: <code class="bg-gray-700 p-1 rounded text-white">${FIXED_PASSWORD}</code>
                 </div>
             `;
-            
-            // Ordina i messaggi per data di creazione, in modo che l'ultimo sia in fondo
-            messages.sort((a, b) => a.createdAt && b.createdAt ? a.createdAt.toMillis() - b.createdAt.toMillis() : 0);
             
             messages.forEach(msg => {
                 messagesHtml += `
